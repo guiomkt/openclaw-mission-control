@@ -31,9 +31,19 @@ SESSION_DEP = Depends(get_session)
 AUTH_DEP = Depends(get_auth_context)
 ORG_ADMIN_DEP = Depends(require_org_admin)
 BOARD_ID_QUERY = Query(default=None)
+GATEWAY_ID_QUERY = Query(
+    default=None,
+    description=(
+        "UUID of a saved Gateway row. Either `gateway_id` or `board_id` is "
+        "required. Using `gateway_id` lets the operator browse gateway state "
+        "without needing a board scope (useful right after discovery, before "
+        "any boards have been linked to imported agents)."
+    ),
+)
 
 
 def _query_to_resolve_input(
+    gateway_id: str | None = Query(default=None),
     board_id: str | None = Query(default=None),
     gateway_url: str | None = Query(default=None),
     gateway_token: str | None = Query(default=None),
@@ -41,6 +51,7 @@ def _query_to_resolve_input(
     gateway_allow_insecure_tls: bool | None = Query(default=None),
 ) -> GatewayResolveQuery:
     return GatewaySessionService.to_resolve_query(
+        gateway_id=gateway_id,
         board_id=board_id,
         gateway_url=gateway_url,
         gateway_token=gateway_token,
@@ -70,14 +81,16 @@ async def gateways_status(
 
 @router.get("/sessions", response_model=GatewaySessionsResponse)
 async def list_gateway_sessions(
+    gateway_id: str | None = GATEWAY_ID_QUERY,
     board_id: str | None = BOARD_ID_QUERY,
     session: AsyncSession = SESSION_DEP,
     auth: AuthContext = AUTH_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> GatewaySessionsResponse:
-    """List sessions for a gateway associated with a board."""
+    """List sessions for a gateway (via `gateway_id`) or its linked board."""
     service = GatewaySessionService(session)
     return await service.get_sessions(
+        gateway_id=gateway_id,
         board_id=board_id,
         organization_id=ctx.organization.id,
         user=auth.user,
@@ -87,6 +100,7 @@ async def list_gateway_sessions(
 @router.get("/sessions/{session_id}", response_model=GatewaySessionResponse)
 async def get_gateway_session(
     session_id: str,
+    gateway_id: str | None = GATEWAY_ID_QUERY,
     board_id: str | None = BOARD_ID_QUERY,
     session: AsyncSession = SESSION_DEP,
     auth: AuthContext = AUTH_DEP,
@@ -96,6 +110,7 @@ async def get_gateway_session(
     service = GatewaySessionService(session)
     return await service.get_session(
         session_id=session_id,
+        gateway_id=gateway_id,
         board_id=board_id,
         organization_id=ctx.organization.id,
         user=auth.user,
@@ -105,6 +120,7 @@ async def get_gateway_session(
 @router.get("/sessions/{session_id}/history", response_model=GatewaySessionHistoryResponse)
 async def get_session_history(
     session_id: str,
+    gateway_id: str | None = GATEWAY_ID_QUERY,
     board_id: str | None = BOARD_ID_QUERY,
     session: AsyncSession = SESSION_DEP,
     auth: AuthContext = AUTH_DEP,
@@ -114,6 +130,7 @@ async def get_session_history(
     service = GatewaySessionService(session)
     return await service.get_session_history(
         session_id=session_id,
+        gateway_id=gateway_id,
         board_id=board_id,
         organization_id=ctx.organization.id,
         user=auth.user,
@@ -124,6 +141,7 @@ async def get_session_history(
 async def send_gateway_session_message(
     session_id: str,
     payload: GatewaySessionMessageRequest,
+    gateway_id: str | None = GATEWAY_ID_QUERY,
     board_id: str | None = BOARD_ID_QUERY,
     session: AsyncSession = SESSION_DEP,
     auth: AuthContext = AUTH_DEP,
@@ -134,6 +152,7 @@ async def send_gateway_session_message(
     await service.send_session_message(
         session_id=session_id,
         payload=payload,
+        gateway_id=gateway_id,
         board_id=board_id,
         organization_id=ctx.organization.id,
         user=auth.user,

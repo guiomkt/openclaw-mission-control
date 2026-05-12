@@ -7,5 +7,9 @@
 
 export type SendGatewaySessionMessageApiV1GatewaysSessionsSessionIdMessagePostParams =
   {
+    /**
+     * UUID of a saved Gateway row. Either `gateway_id` or `board_id` is required. Using `gateway_id` lets the operator browse gateway state without needing a board scope (useful right after discovery, before any boards have been linked to imported agents).
+     */
+    gateway_id?: string | null;
     board_id?: string | null;
   };

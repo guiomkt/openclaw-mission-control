@@ -19,6 +19,7 @@ from app.models.skills import GatewayInstalledSkill
 from app.schemas.common import OkResponse
 from app.schemas.gateways import (
     GatewayCreate,
+    GatewayDiscoveryResult,
     GatewayRead,
     GatewayTemplatesSyncResult,
     GatewayUpdate,
@@ -190,6 +191,42 @@ async def update_gateway(
         if exc.status_code != status.HTTP_502_BAD_GATEWAY:
             raise
     return gateway
+
+
+CREATE_BOARD_QUERY = Query(
+    default=False,
+    description=(
+        "When true and the gateway has no associated board yet, create a "
+        "default 'OpenClaw operations' board so the operator lands on "
+        "something useful after onboarding."
+    ),
+)
+
+
+@router.post("/{gateway_id}/discover", response_model=GatewayDiscoveryResult)
+async def discover_gateway_agents(
+    gateway_id: UUID,
+    create_board: bool = CREATE_BOARD_QUERY,
+    session: AsyncSession = SESSION_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> GatewayDiscoveryResult:
+    """Discover runtime agents on an OpenClaw gateway and import them.
+
+    Calls `agents.list` on the gateway over WebSocket RPC, upserts the
+    candidate's `agents` table to reflect the runtime, and returns a summary
+    plus drift report. Imported agents are flagged `is_gateway_managed=true`
+    so the candidate's provisioning loops skip them.
+
+    Pre-condition: the gateway row must already exist in the caller's
+    organization. The endpoint is idempotent — re-running it refreshes
+    name/heartbeat/identity from the runtime without duplicating rows.
+    """
+    service = GatewayAdminLifecycleService(session)
+    gateway = await service.require_gateway(
+        gateway_id=gateway_id,
+        organization_id=ctx.organization.id,
+    )
+    return await service.discover_runtime_agents(gateway, create_board=create_board)
 
 
 @router.post("/{gateway_id}/templates/sync", response_model=GatewayTemplatesSyncResult)

@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/auth/clerk";
 import { useQueryClient } from "@tanstack/react-query";
 import { AgentsTable } from "@/components/agents/AgentsTable";
+import { SessionsPanel } from "@/components/gateways/SessionsPanel";
 import { DashboardPageLayout } from "@/components/templates/DashboardPageLayout";
 import { Button } from "@/components/ui/button";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
@@ -20,6 +21,7 @@ import {
 import {
   type gatewaysStatusApiV1GatewaysStatusGetResponse,
   type getGatewayApiV1GatewaysGatewayIdGetResponse,
+  useDiscoverGatewayAgentsApiV1GatewaysGatewayIdDiscoverPost,
   useGatewaysStatusApiV1GatewaysStatusGet,
   useGetGatewayApiV1GatewaysGatewayIdGet,
 } from "@/api/generated/gateways/gateways";
@@ -52,6 +54,7 @@ export default function GatewayDetailPage() {
 
   const { isAdmin } = useOrganizationMembership(isSignedIn);
   const [deleteTarget, setDeleteTarget] = useState<AgentRead | null>(null);
+  const [discoverFeedback, setDiscoverFeedback] = useState<string | null>(null);
   const agentsKey = getListAgentsApiV1AgentsGetQueryKey(
     gatewayId ? { gateway_id: gatewayId } : undefined,
   );
@@ -158,6 +161,44 @@ export default function GatewayDetailPage() {
     deleteMutation.mutate({ agentId: deleteTarget.id });
   };
 
+  // Discovery mutation. The backend's POST /gateways/{id}/discover calls
+  // `agents.list` on the gateway over WebSocket RPC and upserts an Agent row
+  // per runtime agent (flagging them is_gateway_managed=true so the
+  // candidate's provisioning loops skip them). Re-running is idempotent —
+  // updates `name`, `heartbeat_config`, `identity_profile` from the runtime.
+  const discoverMutation =
+    useDiscoverGatewayAgentsApiV1GatewaysGatewayIdDiscoverPost({
+      mutation: {
+        onSuccess: (response) => {
+          if (response.status === 200) {
+            const data = response.data;
+            const driftCount = data.drift_in_db_only?.length ?? 0;
+            setDiscoverFeedback(
+              `Discovered ${data.discovered} agents — imported ${data.imported}, matched ${data.matched}, drift ${driftCount}.`,
+            );
+            void queryClient.invalidateQueries({ queryKey: agentsKey });
+            void queryClient.invalidateQueries({
+              queryKey: ["gateways", gatewayId],
+            });
+          } else {
+            setDiscoverFeedback("Discovery returned an unexpected response.");
+          }
+        },
+        onError: (err: ApiError) => {
+          setDiscoverFeedback(`Discovery failed: ${err.message}`);
+        },
+      },
+    });
+
+  const handleDiscover = () => {
+    if (!gatewayId) return;
+    setDiscoverFeedback(null);
+    discoverMutation.mutate({
+      gatewayId,
+      params: { create_board: false },
+    });
+  };
+
   return (
     <>
       <DashboardPageLayout
@@ -172,6 +213,17 @@ export default function GatewayDetailPage() {
             <Button variant="outline" onClick={() => router.push("/gateways")}>
               Back to gateways
             </Button>
+            {isAdmin && gatewayId ? (
+              <Button
+                variant="outline"
+                onClick={handleDiscover}
+                disabled={discoverMutation.isPending}
+              >
+                {discoverMutation.isPending
+                  ? "Discovering…"
+                  : "Discover & import agents"}
+              </Button>
+            ) : null}
             {isAdmin && gatewayId ? (
               <Button
                 onClick={() => router.push(`/gateways/${gatewayId}/edit`)}
@@ -194,6 +246,11 @@ export default function GatewayDetailPage() {
           </div>
         ) : gateway ? (
           <div className="space-y-6">
+            {discoverFeedback ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                {discoverFeedback}
+              </div>
+            ) : null}
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -279,6 +336,12 @@ export default function GatewayDetailPage() {
                 </div>
               </div>
             </div>
+
+            <SessionsPanel
+              gatewayId={gatewayId ?? ""}
+              sessions={(status?.sessions as object[] | null | undefined) ?? null}
+              isLoading={statusQuery.isLoading}
+            />
 
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between">

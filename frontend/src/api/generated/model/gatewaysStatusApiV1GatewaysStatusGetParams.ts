@@ -6,6 +6,7 @@
  */
 
 export type GatewaysStatusApiV1GatewaysStatusGetParams = {
+  gateway_id?: string | null;
   board_id?: string | null;
   gateway_url?: string | null;
   gateway_token?: string | null;

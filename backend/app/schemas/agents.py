@@ -236,6 +236,15 @@ class AgentRead(AgentBase):
         default=False,
         description="Whether this agent is the primary gateway agent.",
     )
+    is_gateway_managed: bool = Field(
+        default=False,
+        description=(
+            "Whether this agent was discovered from a pre-existing OpenClaw "
+            "deployment. When True, the candidate's provisioning loops "
+            "(templates sync, lifecycle reconcile) skip the row so they "
+            "don't overwrite operator-tuned gateway config."
+        ),
+    )
     openclaw_session_id: str | None = Field(
         default=None,
         description="Optional openclaw session token.",

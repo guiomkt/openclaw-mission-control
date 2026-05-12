@@ -41,6 +41,16 @@ async def process_lifecycle_queue_task(task: QueuedTask) -> None:
             )
             return
 
+        if agent.is_gateway_managed:
+            # Imported from a pre-existing OpenClaw deployment; operator owns
+            # the gateway-side templates / heartbeat. We don't re-provision
+            # these rows even if they miss check-in.
+            logger.info(
+                "lifecycle.reconcile.skip_gateway_managed",
+                extra={"agent_id": str(agent.id)},
+            )
+            return
+
         # Ignore stale queue messages after a newer lifecycle generation.
         if agent.lifecycle_generation != payload.generation:
             logger.info(

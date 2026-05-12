@@ -321,6 +321,12 @@ class OpenClawProvisioningService(OpenClawDBService):
 
         stop_sync = False
         for agent in agents:
+            if agent.is_gateway_managed:
+                # Imported from an existing OpenClaw deployment — operator
+                # owns the templates / heartbeat on the gateway side. Skip
+                # so we never overwrite hand-tuned config.
+                result.agents_skipped += 1
+                continue
             board = boards_by_id.get(agent.board_id) if agent.board_id is not None else None
             if board is None:
                 result.agents_skipped += 1

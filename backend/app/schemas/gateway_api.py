@@ -16,8 +16,16 @@ class GatewaySessionMessageRequest(SQLModel):
 
 
 class GatewayResolveQuery(SQLModel):
-    """Query parameters used to resolve which gateway to target."""
+    """Query parameters used to resolve which gateway to target.
 
+    Resolution precedence: `gateway_id` (a saved Gateway row in mc-v2) >
+    `gateway_url` (free-form override, optionally with token / TLS flags) >
+    `board_id` (looks up the board's linked gateway). At least one of the
+    three is required; if multiple are provided, the higher-precedence one
+    wins.
+    """
+
+    gateway_id: str | None = None
     board_id: str | None = None
     gateway_url: str | None = None
     gateway_token: str | None = None

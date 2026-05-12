@@ -49,5 +49,11 @@ class Agent(QueryModel, table=True):
     checkin_deadline_at: datetime | None = Field(default=None)
     last_provision_error: str | None = Field(default=None, sa_column=Column(Text))
     is_board_lead: bool = Field(default=False, index=True)
+    # When True, this Agent row was discovered from a pre-existing OpenClaw
+    # deployment and the operator manages its templates / heartbeat /
+    # workspace config directly on the gateway side. The candidate's
+    # provisioning loops (templates sync, ensure_main_agent, lifecycle
+    # reconcile) skip these rows so they don't overwrite hand-tuned configs.
+    is_gateway_managed: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
