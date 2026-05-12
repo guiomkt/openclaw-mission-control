@@ -1,7 +1,14 @@
 "use client";
 
-// NOTE: We intentionally keep this file very small and dependency-free.
-// It provides CI/secretless-build safe fallbacks for Clerk hooks/components.
+// NOTE: Despite the filename, this is the unified hook surface for every auth
+// mode supported by Mission Control (Clerk, Local, Supabase). Call sites
+// import the same `useAuth`/`useUser`/`SignedIn`/`SignedOut` regardless of
+// mode; the dispatch happens here. Keep prerender-safe (no top-level throws).
+//
+// Hook discipline: every hook in this file is called unconditionally at the
+// top of its component/hook, then we branch on auth-mode and discard the
+// unused values. This keeps the Rules of Hooks satisfied even though only
+// one of (Clerk, Supabase, Local) is "live" per deployment.
 
 import type { ReactNode, ComponentProps } from "react";
 
@@ -16,7 +23,12 @@ import {
 } from "@clerk/nextjs";
 
 import { isLikelyValidClerkPublishableKey } from "@/auth/clerkKey";
-import { getLocalAuthToken, isLocalAuthMode } from "@/auth/localAuth";
+import {
+  getLocalAuthToken,
+  isLocalAuthMode,
+  isSupabaseAuthMode,
+} from "@/auth/localAuth";
+import { useSupabaseAuth } from "@/auth/SupabaseAuthContext";
 
 function hasLocalAuthToken(): boolean {
   return Boolean(getLocalAuthToken());
@@ -26,22 +38,31 @@ export function isClerkEnabled(): boolean {
   // IMPORTANT: keep this in sync with AuthProvider; otherwise components like
   // <SignedOut/> may render without a <ClerkProvider/> and crash during prerender.
   if (isLocalAuthMode()) return false;
+  if (isSupabaseAuthMode()) return false;
   return isLikelyValidClerkPublishableKey(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   );
 }
 
 export function SignedIn(props: { children: ReactNode }) {
+  const supabase = useSupabaseAuth();
   if (isLocalAuthMode()) {
     return hasLocalAuthToken() ? <>{props.children}</> : null;
+  }
+  if (isSupabaseAuthMode()) {
+    return supabase.session ? <>{props.children}</> : null;
   }
   if (!isClerkEnabled()) return null;
   return <ClerkSignedIn>{props.children}</ClerkSignedIn>;
 }
 
 export function SignedOut(props: { children: ReactNode }) {
+  const supabase = useSupabaseAuth();
   if (isLocalAuthMode()) {
     return hasLocalAuthToken() ? null : <>{props.children}</>;
+  }
+  if (isSupabaseAuthMode()) {
+    return supabase.session ? null : <>{props.children}</>;
   }
   if (!isClerkEnabled()) return <>{props.children}</>;
   return <ClerkSignedOut>{props.children}</ClerkSignedOut>;
@@ -61,6 +82,7 @@ export function SignOutButton(
 }
 
 export function useUser() {
+  const supabase = useSupabaseAuth();
   if (isLocalAuthMode()) {
     return {
       isLoaded: true,
@@ -68,13 +90,22 @@ export function useUser() {
       user: null,
     } as const;
   }
+  if (isSupabaseAuthMode()) {
+    return {
+      isLoaded: supabase.loaded,
+      isSignedIn: Boolean(supabase.session),
+      user: supabase.user,
+    } as const;
+  }
   if (!isClerkEnabled()) {
     return { isLoaded: true, isSignedIn: false, user: null } as const;
   }
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   return clerkUseUser();
 }
 
 export function useAuth() {
+  const supabase = useSupabaseAuth();
   if (isLocalAuthMode()) {
     const token = getLocalAuthToken();
     return {
@@ -83,6 +114,15 @@ export function useAuth() {
       userId: token ? "local-user" : null,
       sessionId: token ? "local-session" : null,
       getToken: async () => token,
+    } as const;
+  }
+  if (isSupabaseAuthMode()) {
+    return {
+      isLoaded: supabase.loaded,
+      isSignedIn: Boolean(supabase.session),
+      userId: supabase.user?.id ?? null,
+      sessionId: supabase.session?.access_token ? "supabase-session" : null,
+      getToken: supabase.getToken,
     } as const;
   }
   if (!isClerkEnabled()) {
@@ -94,6 +134,7 @@ export function useAuth() {
       getToken: async () => null,
     } as const;
   }
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   return clerkUseAuth();
 }
 

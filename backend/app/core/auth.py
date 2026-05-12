@@ -1,4 +1,4 @@
-"""User authentication helpers for Clerk and local-token auth modes.
+"""User authentication helpers for Clerk, local-token, and Supabase auth modes.
 
 This module resolves an authenticated *user* from inbound HTTP requests.
 
@@ -6,6 +6,10 @@ Auth modes:
 - `local`: a single shared bearer token (`LOCAL_AUTH_TOKEN`) for self-hosted
   deployments.
 - `clerk`: Clerk JWT authentication for multi-user deployments.
+- `supabase`: Supabase Auth — HS256 access tokens signed with the project's
+  JWT secret. The `sub` claim (UUID) is stored in the existing
+  `users.clerk_user_id` column; the column name predates this provider, but
+  the semantics are identical (opaque external identifier).
 
 The public surface area is the `get_auth_context*` dependencies, which return an
 `AuthContext` used across API routers.
@@ -22,6 +26,8 @@ from hmac import compare_digest
 from typing import TYPE_CHECKING, Literal
 
 import httpx
+import jwt
+from jwt import InvalidTokenError, PyJWTError
 from clerk_backend_api import Clerk
 from clerk_backend_api.models.clerkerrors import ClerkErrors
 from clerk_backend_api.models.sdkerror import SDKError
@@ -359,8 +365,13 @@ async def _get_or_sync_user(
     profile_email: str | None = None
     profile_name: str | None = None
     # Avoid a network roundtrip to Clerk on every request once core profile
-    # fields are present in our DB.
-    should_fetch_profile = created or not user.email or not user.name
+    # fields are present in our DB. The Clerk roundtrip is also nonsensical
+    # outside Clerk mode — supabase/local don't have a profile API here, and
+    # the secret in the env wouldn't authenticate against api.clerk.com.
+    should_fetch_profile = (
+        settings.auth_mode == AuthMode.CLERK
+        and (created or not user.email or not user.name)
+    )
     if should_fetch_profile:
         profile_email, profile_name = await _fetch_clerk_profile(clerk_user_id)
 
@@ -452,6 +463,89 @@ def _parse_subject(claims: dict[str, object]) -> str | None:
     return payload.sub
 
 
+def _decode_supabase_token(token: str) -> dict[str, object] | None:
+    """Validate a Supabase access token and return its claims, or None on failure.
+
+    Supabase issues HS256-signed JWTs whose secret is `SUPABASE_JWT_SECRET`
+    (Project Settings → API → JWT Settings). We rely on PyJWT for signature
+    + `exp` enforcement, with the configurable leeway already used by the
+    Clerk path. Audience is `authenticated` for normal user tokens; we
+    accept anything in that family so service-role/anon tokens that reach
+    here get rejected at the user-resolution stage (no matching `sub` in
+    DB).
+    """
+    secret = settings.supabase_jwt_secret.strip()
+    if not secret:
+        return None
+    try:
+        return jwt.decode(  # type: ignore[no-any-return]
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "sub"]},
+            leeway=settings.supabase_leeway,
+            audience="authenticated",
+        )
+    except InvalidTokenError as exc:
+        logger.info("auth.supabase.invalid_token reason=%s", exc.__class__.__name__)
+        return None
+    except PyJWTError as exc:
+        logger.warning("auth.supabase.jwt_error reason=%s", exc.__class__.__name__)
+        return None
+
+
+async def _resolve_supabase_auth_context(
+    *,
+    request: Request,
+    session: AsyncSession,
+    required: bool,
+) -> AuthContext | None:
+    """Bearer-token Supabase JWT → AuthContext, reusing the Clerk user-sync path.
+
+    The user-upsert helper (`_get_or_sync_user`) is named for Clerk but is
+    keyed on an opaque external id — exactly what Supabase's `sub` is. We
+    skip the Clerk profile fetch by passing claims that already contain
+    email/name; `_fetch_clerk_profile` is only triggered when those are
+    missing.
+    """
+    token = _extract_bearer_token(request.headers.get("Authorization"))
+    if token is None:
+        if required:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        return None
+
+    claims = _decode_supabase_token(token)
+    if claims is None:
+        if required:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        return None
+
+    sub = _non_empty_str(claims.get("sub"))
+    if not sub:
+        if required:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        return None
+
+    # Supabase places email/name where _extract_claim_email/_extract_claim_name
+    # already look (top-level "email", and "user_metadata.name" via the
+    # generic `name`/`full_name` keys when set during signup). Flatten the
+    # `user_metadata` block so the Clerk-style extractors still find them.
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        for k, v in user_metadata.items():
+            claims.setdefault(str(k), v)
+
+    user = await _get_or_sync_user(
+        session,
+        clerk_user_id=sub,
+        claims=claims,
+    )
+    from app.services.organizations import ensure_member_for_user
+
+    await ensure_member_for_user(session, user)
+    return AuthContext(actor_type="user", user=user)
+
+
 async def get_auth_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = SECURITY_DEP,
@@ -467,6 +561,16 @@ async def get_auth_context(
         if local_auth is None:  # pragma: no cover
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
         return local_auth
+
+    if settings.auth_mode == AuthMode.SUPABASE:
+        supabase_auth = await _resolve_supabase_auth_context(
+            request=request,
+            session=session,
+            required=True,
+        )
+        if supabase_auth is None:  # pragma: no cover
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        return supabase_auth
 
     request_state = await _authenticate_clerk_request(request)
     if request_state.status != AuthStatus.SIGNED_IN or not isinstance(request_state.payload, dict):
@@ -504,6 +608,13 @@ async def get_auth_context_optional(
         return None
     if settings.auth_mode == AuthMode.LOCAL:
         return await _resolve_local_auth_context(
+            request=request,
+            session=session,
+            required=False,
+        )
+
+    if settings.auth_mode == AuthMode.SUPABASE:
+        return await _resolve_supabase_auth_context(
             request=request,
             session=session,
             required=False,

@@ -28,6 +28,10 @@ dependencies = [
     "redis==6.3.0",
     "rq==2.6.0",
     "cryptography==45.0.7",
+    # Used for Supabase Auth (HS256 JWT validation) and gateway-token at-rest
+    # encryption (pgcrypto envelope). PyJWT is the simpler dep than python-jose
+    # for the validation surface we need (HS256, exp, leeway).
+    "pyjwt==2.11.0",
 ]
 
 [project.optional-dependencies]

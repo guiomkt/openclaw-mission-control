@@ -49,6 +49,23 @@ class Settings(BaseSettings):
     clerk_verify_iat: bool = True
     clerk_leeway: float = 10.0
 
+    # Supabase auth + storage. SUPABASE_JWT_SECRET is the HS256 signing key
+    # for access tokens (Project Settings → API → JWT Settings). The URL is
+    # informational + used for the OpenAPI/health surface. The service-role
+    # key is reserved for backend-side privileged operations that bypass RLS
+    # (currently unused — included so we don't have to round-trip back to
+    # ops to add an env var the day we need it).
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
+    supabase_service_role_key: str = ""
+    supabase_leeway: float = 10.0
+
+    # Encryption key (32 bytes / 256-bit base64) used by the gateway-token
+    # column TypeDecorator (pgcrypto pgp_sym_*). Required in supabase mode
+    # because the database is shared (Supabase Cloud) and we don't want
+    # plaintext tokens at rest.
+    gateway_token_encryption_key: str = ""
+
     cors_origins: str = ""
     base_url: str = ""
 
@@ -107,6 +124,19 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "LOCAL_AUTH_TOKEN must be at least 50 characters and non-placeholder when AUTH_MODE=local.",
+                )
+        elif self.auth_mode == AuthMode.SUPABASE:
+            if not self.supabase_jwt_secret.strip():
+                raise ValueError(
+                    "SUPABASE_JWT_SECRET must be set and non-empty when AUTH_MODE=supabase.",
+                )
+            if not self.gateway_token_encryption_key.strip():
+                # Shared-database mode (Supabase Cloud) means anyone with the
+                # database password could read gateway tokens. We refuse to
+                # boot without the at-rest encryption key configured.
+                raise ValueError(
+                    "GATEWAY_TOKEN_ENCRYPTION_KEY must be set when AUTH_MODE=supabase. "
+                    "Generate with: openssl rand -base64 32",
                 )
 
         base_url = self.base_url.strip()

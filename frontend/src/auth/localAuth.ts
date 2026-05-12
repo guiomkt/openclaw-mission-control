@@ -9,6 +9,10 @@ export function isLocalAuthMode(): boolean {
   return process.env.NEXT_PUBLIC_AUTH_MODE === AuthMode.Local;
 }
 
+export function isSupabaseAuthMode(): boolean {
+  return process.env.NEXT_PUBLIC_AUTH_MODE === AuthMode.Supabase;
+}
+
 export function setLocalAuthToken(token: string): void {
   localToken = token;
   if (typeof window === "undefined") return;
