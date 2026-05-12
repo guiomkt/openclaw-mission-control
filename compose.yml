@@ -58,6 +58,14 @@ services:
     ports:
       # Loopback only — public traffic enters via the upstream reverse proxy.
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    networks:
+      # `openclaw_net` (declared below as external) attaches the backend to
+      # the OpenClaw gateway's compose network so the gateway is reachable by
+      # service alias (`openclaw:64931`) without exposing the gateway on the
+      # host. Set `OPENCLAW_NETWORK_NAME` if your OpenClaw compose project
+      # uses a different network name.
+      - default
+      - openclaw_net
 
   frontend:
     build:
@@ -121,3 +129,21 @@ services:
       RQ_DISPATCH_THROTTLE_SECONDS: ${RQ_DISPATCH_THROTTLE_SECONDS:-2.0}
       RQ_DISPATCH_MAX_RETRIES: ${RQ_DISPATCH_MAX_RETRIES:-3}
     restart: unless-stopped
+
+# Network definitions.
+# `default` enables IPv6 for the Supabase Cloud DB host (whose A record
+# does not resolve from the AWS regions Docker uses by default on some
+# hosts; Supabase always publishes AAAA).
+# `openclaw_net` is the external compose network of the local OpenClaw
+# gateway deployment; attaching the backend here lets it reach the gateway
+# by service alias (`openclaw:64931`) without exposing it on the host.
+networks:
+  default:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+        - subnet: fd00:dead:beef::/64
+  openclaw_net:
+    name: openclaw-kozw_default
+    external: true

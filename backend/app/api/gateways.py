@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import col
 
 from app.api.deps import require_org_admin
@@ -94,7 +94,17 @@ async def create_gateway(
     auth: AuthContext = AUTH_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> Gateway:
-    """Create a gateway and provision or refresh its main agent."""
+    """Create a gateway and (best-effort) provision its main agent.
+
+    `ensure_main_agent` is the housekeeping step that registers a synthetic
+    `mc-gateway-<uuid>` agent on the OpenClaw side so MC can route
+    administrative commands to it. On a foreign / heavily-customized
+    gateway (multiple existing agents, custom channel routing, etc.) the
+    runtime may refuse to load that synthetic agent — the gateway row
+    itself is still useful for connecting to *existing* agents, so we
+    swallow the provisioning failure and stamp the gateway with a
+    diagnostic `last_provision_error` rather than 502ing the request.
+    """
     service = GatewayAdminLifecycleService(session)
     await service.assert_gateway_runtime_compatible(
         url=payload.url,
@@ -107,7 +117,15 @@ async def create_gateway(
     data["id"] = gateway_id
     data["organization_id"] = ctx.organization.id
     gateway = await crud.create(session, Gateway, **data)
-    await service.ensure_main_agent(gateway, auth, action="provision")
+    try:
+        await service.ensure_main_agent(gateway, auth, action="provision")
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_502_BAD_GATEWAY:
+            raise
+        # Surface the diagnostic via /agents (last_provision_error column);
+        # the gateway row is already committed. The operator can retry by
+        # PATCHing the gateway, which re-runs `ensure_main_agent`.
+        return gateway
     return gateway
 
 
@@ -164,7 +182,13 @@ async def update_gateway(
                 disable_device_pairing=next_disable_device_pairing,
             )
     await crud.patch(session, gateway, updates)
-    await service.ensure_main_agent(gateway, auth, action="update")
+    try:
+        await service.ensure_main_agent(gateway, auth, action="update")
+    except HTTPException as exc:
+        # Same fault tolerance as `create_gateway` — see its docstring for
+        # rationale. The gateway row update is already committed.
+        if exc.status_code != status.HTTP_502_BAD_GATEWAY:
+            raise
     return gateway
 
 

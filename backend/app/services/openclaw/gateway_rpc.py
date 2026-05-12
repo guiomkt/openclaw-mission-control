@@ -18,7 +18,30 @@ from urllib.parse import urlencode, urlparse, urlunparse
 from uuid import uuid4
 
 import websockets
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import ConnectionClosed, WebSocketException
+
+# Methods that may cause the gateway to SIGUSR1-restart itself when the
+# requested change touches the runtime config (channels, agents list,
+# tools). The gateway closes the socket without flushing a response in
+# that case, and we treat the resulting `ConnectionClosed*` from `recv()`
+# as a best-effort success — the caller verifies via a fresh `config.get`
+# whether the change actually applied.
+_RESTART_PRONE_METHODS = frozenset({"config.patch", "config.apply", "config.set"})
+
+# Seconds to wait after a restart-absorbed close before the *next* call so
+# the new gateway process has time to bind its WS port again AND to fully
+# reload every agent in `agents.list` (each agent reads templates from
+# disk; on the kozw deployment this takes ~6-8 s after SIGUSR1). 12 s is
+# a deliberate over-shoot — gateway provision is a one-time interactive
+# action, not on the hot path.
+_RESTART_SETTLE_SECONDS = 12.0
+
+# After a restart, an immediate connect can land on the half-bound port and
+# get a clean close (1005), and even a successful connect can return
+# "unknown agent id" until the agents map is fully built. We retry both
+# failure modes with linear backoff.
+_CONNECT_RETRY_ATTEMPTS = 6
+_CONNECT_RETRY_DELAY_SECONDS = 2.0
 
 from app.core.logging import TRACE_LEVEL, get_logger
 from app.services.openclaw.device_identity import (
@@ -318,7 +341,26 @@ async def _send_request(
         sorted((params or {}).keys()),
     )
     await ws.send(json.dumps(message))
-    return await _await_response(ws, request_id)
+    try:
+        return await _await_response(ws, request_id)
+    except ConnectionClosed:
+        # OpenClaw SIGUSR1-restarts itself when a `config.{patch,apply,set}`
+        # touches the runtime config; the close arrives before the JSON
+        # response is flushed. For these methods, treat a clean close after
+        # `send()` as a best-effort success and return a synthetic payload
+        # that mirrors the shape callers expect. We then sleep briefly so
+        # the caller's next openclaw_call doesn't race the restarting
+        # gateway (it takes ~1-2 s for the new process to bind the WS port
+        # again).
+        if method in _RESTART_PRONE_METHODS:
+            logger.info(
+                "gateway.rpc.restart_absorbed method=%s request_id=%s",
+                method,
+                request_id,
+            )
+            await asyncio.sleep(_RESTART_SETTLE_SECONDS)
+            return {"ok": True, "restartAbsorbed": True}
+        raise
 
 
 def _build_connect_params(
@@ -418,6 +460,75 @@ async def _openclaw_call_once(
         return await _send_request(ws, method, params)
 
 
+_MISSING_AGENT_MARKERS = (
+    "unknown agent",
+    "no such agent",
+    "agent does not exist",
+    "agent not found",
+)
+
+
+def _is_missing_agent_message(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _MISSING_AGENT_MARKERS)
+
+
+async def _retry_call_once(
+    method: str,
+    params: dict[str, Any] | None,
+    *,
+    config: GatewayConfig,
+    gateway_url: str,
+) -> object:
+    """Call `_openclaw_call_once`, retrying when the gateway is still restarting.
+
+    A SIGUSR1 restart races with the next caller's connect on two paths:
+    - the WS upgrade succeeds on the Express proxy but the inner gateway
+      closes immediately (1005), or the handshake closes mid-flight; and
+    - the connect succeeds but the gateway's agents map hasn't rebuilt yet,
+      so agent-scoped methods return "unknown agent id".
+
+    We treat both as "gateway not ready yet" and retry with linear backoff.
+    """
+    last_close_exc: ConnectionClosed | None = None
+    last_missing_exc: OpenClawGatewayError | None = None
+    for attempt in range(1, _CONNECT_RETRY_ATTEMPTS + 1):
+        try:
+            return await _openclaw_call_once(
+                method,
+                params,
+                config=config,
+                gateway_url=gateway_url,
+            )
+        except ConnectionClosed as exc:
+            last_close_exc = exc
+            if attempt == _CONNECT_RETRY_ATTEMPTS:
+                break
+            logger.info(
+                "gateway.rpc.call.retry method=%s attempt=%s reason=%s",
+                method,
+                attempt,
+                exc.__class__.__name__,
+            )
+            await asyncio.sleep(_CONNECT_RETRY_DELAY_SECONDS)
+        except OpenClawGatewayError as exc:
+            if not _is_missing_agent_message(str(exc)):
+                raise
+            last_missing_exc = exc
+            if attempt == _CONNECT_RETRY_ATTEMPTS:
+                break
+            logger.info(
+                "gateway.rpc.call.retry method=%s attempt=%s reason=MissingAgent",
+                method,
+                attempt,
+            )
+            await asyncio.sleep(_CONNECT_RETRY_DELAY_SECONDS)
+    if last_missing_exc is not None:
+        raise last_missing_exc
+    assert last_close_exc is not None  # one of the branches must have populated
+    raise last_close_exc
+
+
 async def _openclaw_connect_metadata_once(
     *,
     config: GatewayConfig,
@@ -455,7 +566,7 @@ async def openclaw_call(
         config.disable_device_pairing,
     )
     try:
-        payload = await _openclaw_call_once(
+        payload = await _retry_call_once(
             method,
             params,
             config=config,

@@ -126,9 +126,13 @@ class Settings(BaseSettings):
                     "LOCAL_AUTH_TOKEN must be at least 50 characters and non-placeholder when AUTH_MODE=local.",
                 )
         elif self.auth_mode == AuthMode.SUPABASE:
-            if not self.supabase_jwt_secret.strip():
+            # Either ES256 (JWKS via SUPABASE_URL) or HS256 (SUPABASE_JWT_SECRET)
+            # is enough; the verification path picks per-token based on the
+            # JWT header. Reject only when both are missing.
+            if not self.supabase_jwt_secret.strip() and not self.supabase_url.strip():
                 raise ValueError(
-                    "SUPABASE_JWT_SECRET must be set and non-empty when AUTH_MODE=supabase.",
+                    "Configure SUPABASE_URL (for ES256 JWKS) or SUPABASE_JWT_SECRET "
+                    "(legacy HS256) when AUTH_MODE=supabase.",
                 )
             if not self.gateway_token_encryption_key.strip():
                 # Shared-database mode (Supabase Cloud) means anyone with the

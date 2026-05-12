@@ -6,8 +6,11 @@ Auth modes:
 - `local`: a single shared bearer token (`LOCAL_AUTH_TOKEN`) for self-hosted
   deployments.
 - `clerk`: Clerk JWT authentication for multi-user deployments.
-- `supabase`: Supabase Auth — HS256 access tokens signed with the project's
-  JWT secret. The `sub` claim (UUID) is stored in the existing
+- `supabase`: Supabase Auth — JWTs signed with either ES256 (asymmetric, the
+  default for projects created after Apr 2025) or HS256 (legacy, shared
+  secret). We pick the verification path from the JWT header's `alg`/`kid`;
+  ES256 keys are fetched from the project's JWKS endpoint, HS256 keys from
+  `SUPABASE_JWT_SECRET`. The `sub` claim (UUID) is stored in the existing
   `users.clerk_user_id` column; the column name predates this provider, but
   the semantics are identical (opaque external identifier).
 
@@ -463,29 +466,86 @@ def _parse_subject(claims: dict[str, object]) -> str | None:
     return payload.sub
 
 
+_SUPABASE_JWKS_CLIENT: jwt.PyJWKClient | None = None
+_SUPABASE_JWKS_URL: str | None = None
+
+
+def _get_supabase_jwks_client() -> jwt.PyJWKClient | None:
+    """Return a cached PyJWKClient pointed at `SUPABASE_URL`'s JWKS endpoint.
+
+    PyJWKClient caches keys for the duration of the process (15-minute TTL
+    by default), which matches Supabase's published rotation cadence. We
+    rebuild the client only when `SUPABASE_URL` changes (effectively never
+    at runtime, but defensive against test reconfiguration).
+    """
+    global _SUPABASE_JWKS_CLIENT, _SUPABASE_JWKS_URL
+    base = settings.supabase_url.strip().rstrip("/")
+    if not base:
+        return None
+    jwks_url = f"{base}/auth/v1/.well-known/jwks.json"
+    if _SUPABASE_JWKS_CLIENT is None or _SUPABASE_JWKS_URL != jwks_url:
+        _SUPABASE_JWKS_CLIENT = jwt.PyJWKClient(jwks_url, cache_keys=True)
+        _SUPABASE_JWKS_URL = jwks_url
+    return _SUPABASE_JWKS_CLIENT
+
+
 def _decode_supabase_token(token: str) -> dict[str, object] | None:
     """Validate a Supabase access token and return its claims, or None on failure.
 
-    Supabase issues HS256-signed JWTs whose secret is `SUPABASE_JWT_SECRET`
-    (Project Settings → API → JWT Settings). We rely on PyJWT for signature
-    + `exp` enforcement, with the configurable leeway already used by the
-    Clerk path. Audience is `authenticated` for normal user tokens; we
-    accept anything in that family so service-role/anon tokens that reach
-    here get rejected at the user-resolution stage (no matching `sub` in
-    DB).
+    Supabase signs JWTs with one of two algorithms:
+    - **ES256** (default for projects created after Apr 2025; "asymmetric
+      JWT signing keys"). Public keys are published at the project's
+      `/.well-known/jwks.json` endpoint and indexed by `kid`.
+    - **HS256** (legacy). Shared secret is `SUPABASE_JWT_SECRET`
+      (Project Settings → API → JWT Settings).
+
+    We dispatch on the header's `alg` so dual-mode projects mid-migration
+    still work; we accept both algorithms when both are configured.
+
+    Audience is `authenticated` for normal user tokens; service-role and
+    anon tokens get rejected at the user-resolution stage (no matching
+    `sub` in our DB). PyJWT enforces `exp` and the leeway already used by
+    the Clerk path.
     """
-    secret = settings.supabase_jwt_secret.strip()
-    if not secret:
-        return None
     try:
-        return jwt.decode(  # type: ignore[no-any-return]
-            token,
-            secret,
-            algorithms=["HS256"],
-            options={"require": ["exp", "sub"]},
-            leeway=settings.supabase_leeway,
-            audience="authenticated",
-        )
+        header = jwt.get_unverified_header(token)
+    except (InvalidTokenError, PyJWTError) as exc:
+        logger.info("auth.supabase.invalid_token reason=%s", exc.__class__.__name__)
+        return None
+
+    alg = header.get("alg")
+    common_options = {
+        "options": {"require": ["exp", "sub"]},
+        "leeway": settings.supabase_leeway,
+        "audience": "authenticated",
+    }
+
+    try:
+        if alg == "HS256":
+            secret = settings.supabase_jwt_secret.strip()
+            if not secret:
+                logger.info("auth.supabase.invalid_token reason=NoHS256SecretConfigured")
+                return None
+            return jwt.decode(  # type: ignore[no-any-return]
+                token,
+                secret,
+                algorithms=["HS256"],
+                **common_options,
+            )
+        if alg in ("ES256", "RS256", "EdDSA"):
+            client = _get_supabase_jwks_client()
+            if client is None:
+                logger.info("auth.supabase.invalid_token reason=NoJWKSConfigured")
+                return None
+            signing_key = client.get_signing_key_from_jwt(token).key
+            return jwt.decode(  # type: ignore[no-any-return]
+                token,
+                signing_key,
+                algorithms=[alg],
+                **common_options,
+            )
+        logger.info("auth.supabase.invalid_token reason=UnsupportedAlg alg=%s", alg)
+        return None
     except InvalidTokenError as exc:
         logger.info("auth.supabase.invalid_token reason=%s", exc.__class__.__name__)
         return None
