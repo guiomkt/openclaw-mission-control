@@ -41,7 +41,11 @@ def get_url() -> str:
     return _normalize_database_url(settings.database_url)
 
 
-config.set_main_option("sqlalchemy.url", get_url())
+# configparser uses `%` as the interpolation char, so percent-encoded password
+# bytes (e.g. `%40` for `@` in a Supabase URL) explode with
+# `invalid interpolation syntax`. Escape `%` → `%%` so set_main_option round-
+# trips correctly; SQLAlchemy's URL parser unescapes back on read.
+config.set_main_option("sqlalchemy.url", get_url().replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
