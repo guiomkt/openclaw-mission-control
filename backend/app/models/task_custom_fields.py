@@ -53,10 +53,13 @@ class BoardTaskCustomField(TenantScoped, table=True):
 
     __tablename__ = "board_task_custom_fields"  # pyright: ignore[reportAssignmentType]
     __table_args__ = (
+        # Constraint name shortened to fit Postgres' 63-char identifier limit.
+        # The full name `uq_board_task_custom_fields_board_id_task_custom_field_definition_id`
+        # exceeded 63 chars and SQLAlchemy 2.0+ validates this at compile time.
         UniqueConstraint(
             "board_id",
             "task_custom_field_definition_id",
-            name="uq_board_task_custom_fields_board_id_task_custom_field_definition_id",
+            name="uq_btcf_board_id_field_def_id",
         ),
     )
 
@@ -74,10 +77,12 @@ class TaskCustomFieldValue(TenantScoped, table=True):
 
     __tablename__ = "task_custom_field_values"  # pyright: ignore[reportAssignmentType]
     __table_args__ = (
+        # Shortened from `uq_task_custom_field_values_task_id_task_custom_field_definition_id`
+        # which exceeded Postgres' 63-char identifier limit.
         UniqueConstraint(
             "task_id",
             "task_custom_field_definition_id",
-            name="uq_task_custom_field_values_task_id_task_custom_field_definition_id",
+            name="uq_tcfv_task_id_field_def_id",
         ),
     )
 
