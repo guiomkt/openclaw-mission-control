@@ -1,4 +1,9 @@
-import { getLocalAuthToken, isLocalAuthMode } from "@/auth/localAuth";
+import {
+  getLocalAuthToken,
+  isLocalAuthMode,
+  isSupabaseAuthMode,
+} from "@/auth/localAuth";
+import { getSupabaseBrowserClient } from "@/auth/supabaseClient";
 import { getApiBaseUrl } from "@/lib/api-base";
 
 type ClerkSession = {
@@ -7,6 +12,20 @@ type ClerkSession = {
 
 type ClerkGlobal = {
   session?: ClerkSession | null;
+};
+
+const resolveSupabaseToken = async (): Promise<string | null> => {
+  if (typeof window === "undefined") return null;
+  const client = getSupabaseBrowserClient();
+  if (!client) return null;
+  try {
+    // Always re-read so we never send an expired access token; supabase-js
+    // refreshes silently before the call returns.
+    const { data } = await client.auth.getSession();
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
 };
 
 export class ApiError<TData = unknown> extends Error {
@@ -49,6 +68,12 @@ export const customFetch = async <T>(
   }
   if (isLocalAuthMode() && !headers.has("Authorization")) {
     const token = getLocalAuthToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+  if (isSupabaseAuthMode() && !headers.has("Authorization")) {
+    const token = await resolveSupabaseToken();
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
     }
