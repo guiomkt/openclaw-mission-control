@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { type KeyboardEvent, type MouseEvent, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { SignedIn, SignedOut, useAuth } from "@/auth/clerk";
 import {
@@ -41,8 +41,10 @@ import {
 } from "@/api/generated/boards/boards";
 import {
   type listActivityApiV1ActivityGetResponse,
+  getListActivityApiV1ActivityGetQueryKey,
   useListActivityApiV1ActivityGet,
 } from "@/api/generated/activity/activity";
+import { useActivityRealtime } from "@/lib/supabase-realtime";
 import type { ActivityEventRead } from "@/api/generated/model";
 import {
   formatRelativeTimestamp,
@@ -477,6 +479,7 @@ function InfoBlock({
 
 export default function DashboardPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isSignedIn } = useAuth();
 
   const boardsQuery = useListBoardsApiV1BoardsGet<listBoardsApiV1BoardsGetResponse, ApiError>(
@@ -529,6 +532,16 @@ export default function DashboardPage() {
       },
     },
   );
+
+  // Supabase Realtime: invalidate the activity query the moment a new
+  // activity_events INSERT lands on the org's channel. Layers on top of
+  // the 15s poll above — poll covers Realtime delivery failures, Realtime
+  // covers latency in the steady-state.
+  useActivityRealtime({
+    queryClient,
+    invalidateOnEvent: [getListActivityApiV1ActivityGetQueryKey({ limit: 200 })],
+    enabled: Boolean(isSignedIn),
+  });
 
   const boards = useMemo(
     () =>

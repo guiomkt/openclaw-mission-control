@@ -34,6 +34,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from sqlmodel import Field, SQLModel, col
 
 from app.api.deps import require_org_admin
 from app.core.auth import AuthContext, get_auth_context
@@ -699,6 +700,85 @@ async def get_agent_file(
             size = payload["size"]
     return AgentFileContentResponse(
         agent_id=runtime_id, name=file_name, content=content, size=size,
+    )
+
+
+class DriftStatusEntry(SQLModel):
+    """One detected drift between mc-v2 state and gateway runtime."""
+
+    in_runtime_only: list[str] = Field(default_factory=list)
+    in_db_only: list[str] = Field(default_factory=list)
+    detected_at: datetime | None = None
+
+
+class DriftStatusResponse(SQLModel):
+    drift: DriftStatusEntry | None = None
+
+
+@router.post("/{gateway_id}/drift/scan", response_model=DriftStatusResponse)
+async def scan_drift(
+    gateway_id: UUID,
+    session: AsyncSession = SESSION_DEP,
+    auth: AuthContext = AUTH_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> DriftStatusResponse:
+    """Run drift detection now and return this gateway's latest snapshot.
+
+    Synchronous manual trigger. The scheduled run is via the RQ worker,
+    invoking `app.services.openclaw.drift_detector.detect_gateway_drift_once`.
+    """
+    from app.services.openclaw.drift_detector import detect_gateway_drift_once
+
+    await detect_gateway_drift_once()
+    return await get_drift_status(
+        gateway_id=gateway_id,
+        session=session,
+        auth=auth,
+        ctx=ctx,
+    )
+
+
+@router.get("/{gateway_id}/drift", response_model=DriftStatusResponse)
+async def get_drift_status(
+    gateway_id: UUID,
+    session: AsyncSession = SESSION_DEP,
+    auth: AuthContext = AUTH_DEP,  # noqa: ARG001
+    ctx: OrganizationContext = ORG_ADMIN_DEP,  # noqa: ARG001
+) -> DriftStatusResponse:
+    """Read the most recent drift detection result for this gateway.
+
+    Populated by `drift_detector.detect_gateway_drift_once()` (RQ-scheduled
+    every 5 minutes). Frontend uses this to render the "Drift detected"
+    banner on `/gateways/[id]/`.
+    """
+    # Lazy import keeps the runtime module dependency-free for the common
+    # paths above.
+    from app.models.activity_events import ActivityEvent
+
+    event = await (
+        ActivityEvent.objects.all()
+        .filter(col(ActivityEvent.event_type) == "gateway.drift.detected")
+        .order_by(col(ActivityEvent.created_at).desc())
+        .first(session)
+    )
+    if event is None or not event.message:
+        return DriftStatusResponse(drift=None)
+    try:
+        import json as _json
+
+        data = _json.loads(event.message)
+    except (ValueError, TypeError):
+        return DriftStatusResponse(drift=None)
+    if not isinstance(data, dict):
+        return DriftStatusResponse(drift=None)
+    if data.get("gateway_id") != str(gateway_id):
+        return DriftStatusResponse(drift=None)
+    return DriftStatusResponse(
+        drift=DriftStatusEntry(
+            in_runtime_only=[str(k) for k in (data.get("in_runtime_only") or []) if isinstance(k, str)],
+            in_db_only=[str(k) for k in (data.get("in_db_only") or []) if isinstance(k, str)],
+            detected_at=event.created_at,
+        ),
     )
 
 

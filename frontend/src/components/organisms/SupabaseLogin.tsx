@@ -1,12 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Lock } from "lucide-react";
 
 import { getSupabaseBrowserClient } from "@/auth/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+
+function resolveSiteOrigin(): string {
+  const envBase = process.env.NEXT_PUBLIC_BASE_URL;
+  if (envBase && envBase.length > 0) {
+    return envBase.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "";
+}
 
 /**
  * Email/password sign-in for Supabase mode.
@@ -26,10 +38,13 @@ export function SupabaseLogin({ onAuthenticated }: SupabaseLoginProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [magicLinkSending, setMagicLinkSending] = useState(false);
+  const [magicLinkSuccess, setMagicLinkSuccess] = useState<string | null>(null);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setMagicLinkSuccess(null);
 
     const client = getSupabaseBrowserClient();
     if (!client) {
@@ -59,6 +74,42 @@ export function SupabaseLogin({ onAuthenticated }: SupabaseLoginProps) {
     }
 
     (onAuthenticated ?? defaultOnAuthenticated)();
+  };
+
+  const handleMagicLink = async () => {
+    setError(null);
+    setMagicLinkSuccess(null);
+
+    const client = getSupabaseBrowserClient();
+    if (!client) {
+      setError(
+        "Supabase is not configured — set NEXT_PUBLIC_SUPABASE_URL and " +
+          "NEXT_PUBLIC_SUPABASE_ANON_KEY before signing in.",
+      );
+      return;
+    }
+
+    const cleanedEmail = email.trim();
+    if (!cleanedEmail) {
+      setError("Enter your email to receive a sign-in link.");
+      return;
+    }
+
+    setMagicLinkSending(true);
+    const { error: otpError } = await client.auth.signInWithOtp({
+      email: cleanedEmail,
+      options: {
+        emailRedirectTo: `${resolveSiteOrigin()}/auth/callback`,
+      },
+    });
+    setMagicLinkSending(false);
+
+    if (otpError) {
+      setError(otpError.message || "Could not send sign-in link.");
+      return;
+    }
+
+    setMagicLinkSuccess("Check your email for a sign-in link.");
   };
 
   return (
@@ -128,14 +179,37 @@ export function SupabaseLogin({ onAuthenticated }: SupabaseLoginProps) {
                 {error}
               </p>
             ) : null}
+            {magicLinkSuccess ? (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {magicLinkSuccess}
+              </p>
+            ) : null}
             <Button
               type="submit"
               className="w-full"
               size="lg"
-              disabled={submitting}
+              disabled={submitting || magicLinkSending}
             >
               {submitting ? "Signing in..." : "Continue"}
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              size="lg"
+              onClick={handleMagicLink}
+              disabled={submitting || magicLinkSending}
+            >
+              {magicLinkSending ? "Sending link..." : "Email me a sign-in link"}
+            </Button>
+            <div className="pt-1 text-center">
+              <Link
+                href="/forgot-password"
+                className="text-sm font-medium text-[color:var(--accent)] hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </CardContent>
       </Card>

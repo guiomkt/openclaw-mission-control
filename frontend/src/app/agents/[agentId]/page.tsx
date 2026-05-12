@@ -190,6 +190,14 @@ export default function AgentDetailPage() {
                 </Button>
                 {agent ? (
                   <Link
+                    href={`/agents/${agent.id}/memory`}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[color:var(--border)] px-4 text-sm font-semibold text-muted transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                  >
+                    Memory editor
+                  </Link>
+                ) : null}
+                {agent ? (
+                  <Link
                     href={`/agents/${agent.id}/edit`}
                     className="inline-flex h-10 items-center justify-center rounded-xl border border-[color:var(--border)] px-4 text-sm font-semibold text-muted transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
                   >

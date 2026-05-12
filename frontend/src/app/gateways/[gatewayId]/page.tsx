@@ -9,6 +9,10 @@ import { useAuth } from "@/auth/clerk";
 import { useQueryClient } from "@tanstack/react-query";
 import { AgentsTable } from "@/components/agents/AgentsTable";
 import { SessionsPanel } from "@/components/gateways/SessionsPanel";
+import { ChannelsPanel } from "@/components/openclaw/ChannelsPanel";
+import { DriftBanner } from "@/components/openclaw/DriftBanner";
+import { LogsDrawer } from "@/components/openclaw/LogsDrawer";
+import { ModelsPanel } from "@/components/openclaw/ModelsPanel";
 import { DashboardPageLayout } from "@/components/templates/DashboardPageLayout";
 import { Button } from "@/components/ui/button";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
@@ -226,6 +230,25 @@ export default function GatewayDetailPage() {
             ) : null}
             {isAdmin && gatewayId ? (
               <Button
+                variant="outline"
+                onClick={() => router.push(`/gateways/${gatewayId}/crons`)}
+              >
+                Crons
+              </Button>
+            ) : null}
+            {isAdmin && gatewayId ? (
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/gateways/${gatewayId}/costs`)}
+              >
+                Costs
+              </Button>
+            ) : null}
+            {isAdmin && gatewayId ? (
+              <LogsDrawer gatewayId={gatewayId} />
+            ) : null}
+            {isAdmin && gatewayId ? (
+              <Button
                 onClick={() => router.push(`/gateways/${gatewayId}/edit`)}
               >
                 Edit gateway
@@ -246,6 +269,11 @@ export default function GatewayDetailPage() {
           </div>
         ) : gateway ? (
           <div className="space-y-6">
+            <DriftBanner
+              gatewayId={gatewayId ?? ""}
+              enabled={Boolean(isAdmin && gatewayId)}
+              onResolveClick={handleDiscover}
+            />
             {discoverFeedback ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                 {discoverFeedback}
@@ -335,6 +363,17 @@ export default function GatewayDetailPage() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <ChannelsPanel
+                gatewayId={gatewayId ?? ""}
+                enabled={Boolean(isAdmin && gatewayId)}
+              />
+              <ModelsPanel
+                gatewayId={gatewayId ?? ""}
+                enabled={Boolean(isAdmin && gatewayId)}
+              />
             </div>
 
             <SessionsPanel

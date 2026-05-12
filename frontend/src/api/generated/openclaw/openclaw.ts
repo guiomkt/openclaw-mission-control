@@ -30,6 +30,7 @@ import type {
   CronMutateResponse,
   CronRunsResponse,
   CronUpdateRequest,
+  DriftStatusResponse,
   HTTPValidationError,
   LogsStreamApiV1OpenclawGatewayIdLogsStreamGetParams,
   ModelsListResponse,
@@ -3307,3 +3308,371 @@ export const useSetAgentFileApiV1OpenclawGatewayIdAgentsAgentIdFilesFileNamePut 
       queryClient,
     );
   };
+/**
+ * Run drift detection now and return this gateway's latest snapshot.
+
+Synchronous manual trigger. The scheduled run is via the RQ worker,
+invoking `app.services.openclaw.drift_detector.detect_gateway_drift_once`.
+ * @summary Scan Drift
+ */
+export type scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse200 = {
+  data: DriftStatusResponse;
+  status: 200;
+};
+
+export type scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse422 = {
+  data: HTTPValidationError;
+  status: 422;
+};
+
+export type scanDriftApiV1OpenclawGatewayIdDriftScanPostResponseSuccess =
+  scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse200 & {
+    headers: Headers;
+  };
+export type scanDriftApiV1OpenclawGatewayIdDriftScanPostResponseError =
+  scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse422 & {
+    headers: Headers;
+  };
+
+export type scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse =
+  | scanDriftApiV1OpenclawGatewayIdDriftScanPostResponseSuccess
+  | scanDriftApiV1OpenclawGatewayIdDriftScanPostResponseError;
+
+export const getScanDriftApiV1OpenclawGatewayIdDriftScanPostUrl = (
+  gatewayId: string,
+) => {
+  return `/api/v1/openclaw/${gatewayId}/drift/scan`;
+};
+
+export const scanDriftApiV1OpenclawGatewayIdDriftScanPost = async (
+  gatewayId: string,
+  options?: RequestInit,
+): Promise<scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse> => {
+  return customFetch<scanDriftApiV1OpenclawGatewayIdDriftScanPostResponse>(
+    getScanDriftApiV1OpenclawGatewayIdDriftScanPostUrl(gatewayId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getScanDriftApiV1OpenclawGatewayIdDriftScanPostMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>,
+    TError,
+    { gatewayId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>,
+  TError,
+  { gatewayId: string },
+  TContext
+> => {
+  const mutationKey = ["scanDriftApiV1OpenclawGatewayIdDriftScanPost"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>,
+    { gatewayId: string }
+  > = (props) => {
+    const { gatewayId } = props ?? {};
+
+    return scanDriftApiV1OpenclawGatewayIdDriftScanPost(
+      gatewayId,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ScanDriftApiV1OpenclawGatewayIdDriftScanPostMutationResult =
+  NonNullable<
+    Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>
+  >;
+
+export type ScanDriftApiV1OpenclawGatewayIdDriftScanPostMutationError =
+  HTTPValidationError;
+
+/**
+ * @summary Scan Drift
+ */
+export const useScanDriftApiV1OpenclawGatewayIdDriftScanPost = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>,
+      TError,
+      { gatewayId: string },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof scanDriftApiV1OpenclawGatewayIdDriftScanPost>>,
+  TError,
+  { gatewayId: string },
+  TContext
+> => {
+  return useMutation(
+    getScanDriftApiV1OpenclawGatewayIdDriftScanPostMutationOptions(options),
+    queryClient,
+  );
+};
+/**
+ * Read the most recent drift detection result for this gateway.
+
+Populated by `drift_detector.detect_gateway_drift_once()` (RQ-scheduled
+every 5 minutes). Frontend uses this to render the "Drift detected"
+banner on `/gateways/[id]/`.
+ * @summary Get Drift Status
+ */
+export type getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse200 = {
+  data: DriftStatusResponse;
+  status: 200;
+};
+
+export type getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse422 = {
+  data: HTTPValidationError;
+  status: 422;
+};
+
+export type getDriftStatusApiV1OpenclawGatewayIdDriftGetResponseSuccess =
+  getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse200 & {
+    headers: Headers;
+  };
+export type getDriftStatusApiV1OpenclawGatewayIdDriftGetResponseError =
+  getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse422 & {
+    headers: Headers;
+  };
+
+export type getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse =
+  | getDriftStatusApiV1OpenclawGatewayIdDriftGetResponseSuccess
+  | getDriftStatusApiV1OpenclawGatewayIdDriftGetResponseError;
+
+export const getGetDriftStatusApiV1OpenclawGatewayIdDriftGetUrl = (
+  gatewayId: string,
+) => {
+  return `/api/v1/openclaw/${gatewayId}/drift`;
+};
+
+export const getDriftStatusApiV1OpenclawGatewayIdDriftGet = async (
+  gatewayId: string,
+  options?: RequestInit,
+): Promise<getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse> => {
+  return customFetch<getDriftStatusApiV1OpenclawGatewayIdDriftGetResponse>(
+    getGetDriftStatusApiV1OpenclawGatewayIdDriftGetUrl(gatewayId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryKey = (
+  gatewayId: string,
+) => {
+  return [`/api/v1/openclaw/${gatewayId}/drift`] as const;
+};
+
+export const getGetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryOptions = <
+  TData = Awaited<
+    ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+  >,
+  TError = HTTPValidationError,
+>(
+  gatewayId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<
+          ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+        >,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryKey(gatewayId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>>
+  > = ({ signal }) =>
+    getDriftStatusApiV1OpenclawGatewayIdDriftGet(gatewayId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!gatewayId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryResult =
+  NonNullable<
+    Awaited<ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>>
+  >;
+export type GetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryError =
+  HTTPValidationError;
+
+export function useGetDriftStatusApiV1OpenclawGatewayIdDriftGet<
+  TData = Awaited<
+    ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+  >,
+  TError = HTTPValidationError,
+>(
+  gatewayId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<
+          ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+        >,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<
+            ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+          >,
+          TError,
+          Awaited<
+            ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+          >
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDriftStatusApiV1OpenclawGatewayIdDriftGet<
+  TData = Awaited<
+    ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+  >,
+  TError = HTTPValidationError,
+>(
+  gatewayId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<
+          ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+        >,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<
+            ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+          >,
+          TError,
+          Awaited<
+            ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+          >
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDriftStatusApiV1OpenclawGatewayIdDriftGet<
+  TData = Awaited<
+    ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+  >,
+  TError = HTTPValidationError,
+>(
+  gatewayId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<
+          ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+        >,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Drift Status
+ */
+
+export function useGetDriftStatusApiV1OpenclawGatewayIdDriftGet<
+  TData = Awaited<
+    ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+  >,
+  TError = HTTPValidationError,
+>(
+  gatewayId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<
+          ReturnType<typeof getDriftStatusApiV1OpenclawGatewayIdDriftGet>
+        >,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions =
+    getGetDriftStatusApiV1OpenclawGatewayIdDriftGetQueryOptions(
+      gatewayId,
+      options,
+    );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
