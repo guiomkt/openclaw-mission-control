@@ -24,10 +24,46 @@ import type { Session, User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/auth/supabaseClient";
 
+/**
+ * Clerk-shaped view of a Supabase user, so call sites that destructure
+ * `user.fullName`, `user.imageUrl`, etc. (originally written against the
+ * Clerk SDK) keep compiling. Pull each value defensively because
+ * `user_metadata` is provider-specific and may not contain any of these
+ * keys when the operator signed up via email/password.
+ */
+export interface ClerkLikeUser {
+  id: string;
+  fullName: string | null;
+  firstName: string | null;
+  username: string | null;
+  imageUrl: string | null;
+  primaryEmailAddress: { emailAddress: string } | null;
+}
+
+function adaptSupabaseUser(u: User | null): ClerkLikeUser | null {
+  if (!u) return null;
+  const md = (u.user_metadata ?? {}) as Record<string, unknown>;
+  const pickString = (key: string): string | null => {
+    const value = md[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  };
+  return {
+    id: u.id,
+    fullName: pickString("full_name") ?? pickString("name"),
+    firstName: pickString("first_name") ?? pickString("given_name"),
+    username: pickString("preferred_username") ?? pickString("username"),
+    imageUrl: pickString("avatar_url") ?? pickString("picture"),
+    primaryEmailAddress: u.email ? { emailAddress: u.email } : null,
+  };
+}
+
 interface SupabaseAuthValue {
   loaded: boolean;
   session: Session | null;
-  user: User | null;
+  /** Raw supabase user — handy if you really need provider-specific fields. */
+  rawUser: User | null;
+  /** Clerk-shaped adapter for call-site compatibility. */
+  user: ClerkLikeUser | null;
   /** Returns the current Supabase access JWT, or null if signed out. */
   getToken: () => Promise<string | null>;
   signOut: () => Promise<void>;
@@ -73,7 +109,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     () => ({
       loaded,
       session,
-      user: session?.user ?? null,
+      rawUser: session?.user ?? null,
+      user: adaptSupabaseUser(session?.user ?? null),
       getToken: async () => {
         if (!client) return null;
         // Always re-read the live session: supabase-js refreshes the access
@@ -104,6 +141,7 @@ export function useSupabaseAuth(): SupabaseAuthValue {
   return {
     loaded: true,
     session: null,
+    rawUser: null,
     user: null,
     getToken: async () => null,
     signOut: async () => {},
