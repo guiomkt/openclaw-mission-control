@@ -39,7 +39,7 @@ from sqlmodel import Field, SQLModel, col
 from app.api.deps import require_org_admin
 from app.core.auth import AuthContext, get_auth_context
 from app.core.logging import get_logger
-from app.db.session import get_session
+from app.db.session import async_session_maker, get_session
 from app.models.agents import Agent
 from app.schemas.openclaw_runtime import (
     AgentFileContentResponse,
@@ -442,7 +442,6 @@ async def logs_stream(
     gateway_id: UUID,
     lines: int = Query(default=200, ge=0, le=2000),
     follow: bool = Query(default=True),
-    session: AsyncSession = SESSION_DEP,
     auth: AuthContext = AUTH_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> StreamingResponse:
@@ -456,8 +455,19 @@ async def logs_stream(
     client disconnects. We poll for new entries every second; finer-grained
     push would require subscribing to the gateway's `system-event` stream
     which is a separate Phase E task.
+
+    Pool note: we deliberately do NOT take `session: AsyncSession =
+    SESSION_DEP`. FastAPI's request-scoped session would stay checked out
+    for the full SSE lifetime (potentially hours), starving short-lived
+    requests like `/users/me`. Instead we open a transient session for
+    the one-time gateway-config lookup and let it close before the
+    `StreamingResponse` even starts iterating.
     """
-    config = await _resolve_config(gateway_id, session, auth, ctx)
+    async with async_session_maker() as session:
+        config = await _resolve_config(gateway_id, session, auth, ctx)
+    # `config` is a plain GatewayClientConfig (url + token + flags) — no DB
+    # references — so the generator below is safe to run after the
+    # session above has closed.
 
     async def event_source() -> Any:
         # Initial fetch — capture last N lines (no follow yet).

@@ -37,6 +37,15 @@ const nextConfig: NextConfig = {
         source: "/api/v1/:path*",
         destination: `${backendUrl}/api/v1/:path*`,
       },
+      // Backend exposes the three infra probes at the root (see
+      // `backend/app/main.py:505-520`) — Cloudflare Tunnel + the
+      // sidebar's `useHealthzHealthzGet()` (DashboardSidebar.tsx)
+      // both hit `/healthz` directly, so we need to proxy it too.
+      // Without these rewrites the request falls through to Next's
+      // 404 page and the sidebar shows "System degraded" perpetually.
+      { source: "/healthz", destination: `${backendUrl}/healthz` },
+      { source: "/health", destination: `${backendUrl}/health` },
+      { source: "/readyz", destination: `${backendUrl}/readyz` },
     ];
   },
 };

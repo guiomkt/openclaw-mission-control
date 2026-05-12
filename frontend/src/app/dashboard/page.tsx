@@ -537,9 +537,19 @@ export default function DashboardPage() {
   // activity_events INSERT lands on the org's channel. Layers on top of
   // the 15s poll above — poll covers Realtime delivery failures, Realtime
   // covers latency in the steady-state.
+  //
+  // `invalidateOnEvent` is memoized because `useActivityRealtime` uses it
+  // in a useEffect dep array. An inline array literal here would have a
+  // new identity every render and resubscribe the Supabase channel each
+  // time — wasting quota and adding reconnect churn (caught during the
+  // post-Phase-D regression hunt).
+  const activityInvalidateKeys = useMemo(
+    () => [getListActivityApiV1ActivityGetQueryKey({ limit: 200 })],
+    [],
+  );
   useActivityRealtime({
     queryClient,
-    invalidateOnEvent: [getListActivityApiV1ActivityGetQueryKey({ limit: 200 })],
+    invalidateOnEvent: activityInvalidateKeys,
     enabled: Boolean(isSignedIn),
   });
 

@@ -35,6 +35,15 @@ def _normalize_database_url(database_url: str) -> str:
 async_engine: AsyncEngine = create_async_engine(
     _normalize_database_url(settings.database_url),
     pool_pre_ping=True,
+    # Defaults (5 + 10 overflow = 15 total) were too small once Phase D
+    # added dashboard concurrency + SSE streams. Supabase pooler accepts
+    # up to ~200 conns per project; 60 leaves headroom for RQ + Alembic
+    # while comfortably absorbing the gateway-detail page (≈10 parallel
+    # queries) and a couple of long-lived SSE handlers.
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=10,        # fail fast instead of waiting the 30s default
+    pool_recycle=1800,      # recycle every 30 min — Supabase pooler safety
 )
 async_session_maker = async_sessionmaker(
     async_engine,

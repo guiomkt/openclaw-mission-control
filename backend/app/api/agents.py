@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import ActorContext, require_org_admin, require_user_or_agent
 from app.core.auth import AuthContext, get_auth_context
-from app.db.session import get_session
+from app.db.session import async_session_maker, get_session
 from app.schemas.agents import (
     AgentCreate,
     AgentHeartbeat,
@@ -79,17 +79,27 @@ async def stream_agents(
     request: Request,
     board_id: UUID | None = BOARD_ID_QUERY,
     since: str | None = SINCE_QUERY,
-    session: AsyncSession = SESSION_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> EventSourceResponse:
-    """Stream agent updates as SSE events."""
-    service = AgentLifecycleService(session)
-    return await service.stream_agents(
-        request=request,
-        board_id=board_id,
-        since=since,
-        ctx=ctx,
-    )
+    """Stream agent updates as SSE events.
+
+    We deliberately do NOT take `session: AsyncSession = SESSION_DEP` here.
+    FastAPI keeps request-scoped dependencies open for the entire response
+    lifetime; for an SSE stream that's "until the browser tab closes",
+    which permanently pins a pool connection. The service already opens a
+    short-lived session per tick inside its event generator via
+    `async_session_maker`, so all we need here is a transient session for
+    the one-time authorization check, then we hand the EventSourceResponse
+    back without a long-lived pool slot.
+    """
+    async with async_session_maker() as session:
+        service = AgentLifecycleService(session)
+        return await service.stream_agents(
+            request=request,
+            board_id=board_id,
+            since=since,
+            ctx=ctx,
+        )
 
 
 @router.post("", response_model=AgentRead)
