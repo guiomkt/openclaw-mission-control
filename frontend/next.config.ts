@@ -14,6 +14,31 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  /**
+   * Same-origin proxy from the frontend to the FastAPI backend.
+   *
+   * In production behind Cloudflare Tunnel we want exactly one public route
+   * (`mc.example.com → http://localhost:3000`). The browser then sees every
+   * API call as same-origin (`/api/v1/...`), so cookies/CORS stay simple
+   * and the operator doesn't need a second tunnel hostname. The Next.js
+   * server forwards to `http://backend:8000` over the internal Docker
+   * network.
+   *
+   * `BACKEND_INTERNAL_URL` is read at runtime (Next evaluates `rewrites`
+   * on the server side) so deployments that don't use Docker Compose can
+   * point it elsewhere — defaulting to the compose service name keeps the
+   * happy path zero-config.
+   */
+  async rewrites() {
+    const backendUrl =
+      process.env.BACKEND_INTERNAL_URL?.trim() || "http://backend:8000";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendUrl}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
