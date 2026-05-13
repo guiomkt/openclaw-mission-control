@@ -24,6 +24,11 @@ import {
   type healthzHealthzGetResponse,
   useHealthzHealthzGet,
 } from "@/api/generated/default/default";
+import {
+  type listGatewaysApiV1GatewaysGetResponse,
+  useListGatewaysApiV1GatewaysGet,
+} from "@/api/generated/gateways/gateways";
+import { CalendarClock, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function DashboardSidebar() {
@@ -40,6 +45,26 @@ export function DashboardSidebar() {
       request: { cache: "no-store" },
     },
   );
+
+  // Pull the primary gateway so the sidebar can deep-link the operator
+  // straight to its runtime tabs (crons / costs / sessions / memory). In a
+  // single-tenant deploy there's exactly one gateway and the operator
+  // shouldn't have to drill in through /gateways every time. We pick the
+  // first row deterministically (admins only — non-admins can't view
+  // gateway runtime data anyway).
+  const gatewaysQuery = useListGatewaysApiV1GatewaysGet<
+    listGatewaysApiV1GatewaysGetResponse,
+    ApiError
+  >(undefined, {
+    query: {
+      enabled: Boolean(isSignedIn && isAdmin),
+      staleTime: 60_000,
+    },
+  });
+  const primaryGatewayId =
+    gatewaysQuery.data?.status === 200
+      ? (gatewaysQuery.data.data.items?.[0]?.id ?? null)
+      : null;
 
   const okValue = healthQuery.data?.data?.ok;
   const systemStatus: "unknown" | "operational" | "degraded" =
@@ -202,6 +227,58 @@ export function DashboardSidebar() {
               </>
             ) : null}
           </div>
+
+          {isAdmin && primaryGatewayId ? (
+            <div>
+              <p className="px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                OpenClaw runtime
+              </p>
+              <div className="mt-1 space-y-1">
+                <Link
+                  href={`/gateways/${primaryGatewayId}`}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-700 transition",
+                    pathname === `/gateways/${primaryGatewayId}`
+                      ? "bg-blue-100 text-blue-800 font-medium"
+                      : "hover:bg-slate-100",
+                  )}
+                >
+                  <Network className="h-4 w-4" />
+                  Overview
+                </Link>
+                {/* Sessions list is rendered inside the gateway overview
+                    page (`SessionsPanel`), not at a dedicated route. The
+                    overview link above already covers it; we omit a separate
+                    sub-link to avoid a 404 — sessions only get individual
+                    URLs (`/gateways/{id}/sessions/{key}`) when the operator
+                    clicks into a specific conversation. */}
+                <Link
+                  href={`/gateways/${primaryGatewayId}/crons`}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-700 transition",
+                    pathname.startsWith(`/gateways/${primaryGatewayId}/crons`)
+                      ? "bg-blue-100 text-blue-800 font-medium"
+                      : "hover:bg-slate-100",
+                  )}
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Crons
+                </Link>
+                <Link
+                  href={`/gateways/${primaryGatewayId}/costs`}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-slate-700 transition",
+                    pathname.startsWith(`/gateways/${primaryGatewayId}/costs`)
+                      ? "bg-blue-100 text-blue-800 font-medium"
+                      : "hover:bg-slate-100",
+                  )}
+                >
+                  <DollarSign className="h-4 w-4" />
+                  Custos
+                </Link>
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <p className="px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">

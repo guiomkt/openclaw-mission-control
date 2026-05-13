@@ -101,11 +101,19 @@ class CronCreateRequest(SQLModel):
 
 
 class CronUpdateRequest(SQLModel):
-    schedule: str | None = None
-    target_agent: str | None = None
-    message: str | None = None
-    name: str | None = None
+    """Minimal cron patch — MVP supports pause/resume + rename only.
+
+    OpenClaw's full `CronJobPatch` schema is polymorphic (schedule kind,
+    payload kind, delivery mode + failure alert) and editing it via a
+    REST PATCH would risk corrupting hand-tuned configs. For now the UI
+    only flips `enabled` (pause/resume) and lets the operator rename
+    via `description`. Full editing stays in the OpenClaw CLI until we
+    have proper form support for the nested objects.
+    """
+
     enabled: bool | None = None
+    description: str | None = None
+    name: str | None = None
 
 
 class UsageCostRow(SQLModel):

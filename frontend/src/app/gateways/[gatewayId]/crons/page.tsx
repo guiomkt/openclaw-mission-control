@@ -588,16 +588,11 @@ export default function CronsPage() {
             >
               Back to gateway
             </Button>
-            {isAdmin && gatewayId ? (
-              <Button
-                onClick={() => {
-                  setCreateError(null);
-                  setCreateOpen(true);
-                }}
-              >
-                New cron
-              </Button>
-            ) : null}
+            {/* "New cron" hidden in MVP — OpenClaw's cron.add accepts a
+                polymorphic schedule/payload tree that needs dedicated form
+                support. Until that lands, operators create crons via:
+                  openclaw cron add --cron '<expr>' --agent <id> --message '<text>'
+                Pause/resume, run-now, and delete are available inline. */}
           </div>
         }
         isAdmin={isAdmin}
@@ -737,8 +732,9 @@ export default function CronsPage() {
                                   setEditError(null);
                                   setEditTarget(cron);
                                 }}
+                                title="Edit name/description only. Full schedule/payload edits via OpenClaw CLI."
                               >
-                                Edit
+                                Rename
                               </Button>
                               <Button
                                 variant="outline"

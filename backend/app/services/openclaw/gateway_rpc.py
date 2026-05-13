@@ -40,8 +40,15 @@ _RESTART_SETTLE_SECONDS = 12.0
 # get a clean close (1005), and even a successful connect can return
 # "unknown agent id" until the agents map is fully built. We retry both
 # failure modes with linear backoff.
-_CONNECT_RETRY_ATTEMPTS = 6
-_CONNECT_RETRY_DELAY_SECONDS = 2.0
+# A SIGUSR1 restart of the gateway typically takes ~2-3s before the inner
+# WebSocket comes back up. 4 attempts × 1s gives us ~3s of retry headroom,
+# which covers the normal restart window without dragging short-lived reads
+# (status polls, agents.list) into the 20-30s range we saw before — the old
+# 6×2s=12s of retry wait was bottlenecking the dashboard whenever the
+# gateway was being touched. If the operator hand-edits openclaw.json
+# while the panel is open, the next refetch absorbs the restart cleanly.
+_CONNECT_RETRY_ATTEMPTS = 4
+_CONNECT_RETRY_DELAY_SECONDS = 1.0
 
 from app.core.logging import TRACE_LEVEL, get_logger
 from app.services.openclaw.device_identity import (

@@ -361,19 +361,25 @@ async def add_cron(
     auth: AuthContext = AUTH_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> CronMutateResponse:
-    """Create a new cron entry on the gateway (`cron.add` RPC)."""
-    config = await _resolve_config(gateway_id, session, auth, ctx)
-    params: dict[str, Any] = {
-        "schedule": body.schedule,
-        "targetAgent": body.target_agent,
-        "enabled": body.enabled,
-    }
-    if body.message is not None:
-        params["message"] = body.message
-    if body.name is not None:
-        params["name"] = body.name
-    payload = await _call_or_502("cron.add", params, config=config)
-    return _mutate_response(payload)
+    """Cron creation is not yet supported via the UI.
+
+    OpenClaw's `CronAddParams` is a polymorphic object tree (schedule kind
+    `at|every|cron`, payload kind `systemEvent|agentTurn`, delivery mode,
+    failure alert, etc.) that we can't safely populate from a flat
+    REST body. Returns 501 with a clear pointer to the CLI fallback.
+    The original `body` is intentionally validated so the OpenAPI shape
+    stays stable for the client generator.
+    """
+    _ = (body, gateway_id, session, auth, ctx)  # consumed for shape only
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "Cron creation via UI is not yet supported. "
+            "Use the OpenClaw CLI: `openclaw cron add --cron '<expr>' "
+            "--agent <id> --message '<text>'`. "
+            "Pause/resume, run-now, and delete are available in the UI."
+        ),
+    )
 
 
 @router.patch("/{gateway_id}/crons/{cron_id}", response_model=CronMutateResponse)
@@ -387,21 +393,21 @@ async def update_cron(
 ) -> CronMutateResponse:
     """Patch a cron entry on the gateway (`cron.update` RPC).
 
-    Pause / resume is just `enabled=false` / `enabled=true`. Send only the
-    fields you want to change — `None` values are stripped before the RPC.
+    Scope (MVP): pause/resume via `enabled`, optional rename via `name`
+    or `description`. Schedule / payload / delivery edits stay in the
+    OpenClaw CLI for now — those fields are polymorphic objects that
+    need dedicated form support to be safe to expose. Note that the
+    gateway's `CronJobPatch` schema accepts `name` and `description` at
+    the top level alongside the `id`, so we pass them through directly.
     """
     config = await _resolve_config(gateway_id, session, auth, ctx)
     params: dict[str, Any] = {"id": cron_id}
-    if body.schedule is not None:
-        params["schedule"] = body.schedule
-    if body.target_agent is not None:
-        params["targetAgent"] = body.target_agent
-    if body.message is not None:
-        params["message"] = body.message
-    if body.name is not None:
-        params["name"] = body.name
     if body.enabled is not None:
         params["enabled"] = body.enabled
+    if body.description is not None:
+        params["description"] = body.description
+    if body.name is not None:
+        params["name"] = body.name
     payload = await _call_or_502("cron.update", params, config=config)
     return _mutate_response(payload)
 
@@ -470,11 +476,14 @@ async def logs_stream(
     # session above has closed.
 
     async def event_source() -> Any:
-        # Initial fetch — capture last N lines (no follow yet).
+        # Initial fetch — OpenClaw's `logs.tail` RPC accepts `limit` (max
+        # lines to return) and `maxBytes`; the `follow` flag is honored
+        # server-side. We poll-by-cursor for follow, so the initial call is
+        # always non-follow.
         try:
             payload = await openclaw_call(
                 "logs.tail",
-                {"lines": lines, "follow": False},
+                {"limit": lines},
                 config=config,
             )
         except OpenClawGatewayError as exc:
@@ -487,14 +496,18 @@ async def logs_stream(
             yield "event: done\ndata: {}\n\n"
             return
 
-        # Follow loop: poll for new lines every 1s. Stop on client disconnect
-        # (the StreamingResponse generator gets garbage-collected then).
+        # Follow loop: poll for new lines every 1s using the returned
+        # cursor. Stops when the client disconnects (the StreamingResponse
+        # generator gets garbage-collected then).
         last_cursor = payload.get("cursor") if isinstance(payload, dict) else None
         while True:
             try:
+                params: dict[str, Any] = {"limit": lines}
+                if last_cursor is not None:
+                    params["since"] = last_cursor
                 payload = await openclaw_call(
                     "logs.tail",
-                    {"since": last_cursor, "follow": False},
+                    params,
                     config=config,
                 )
             except OpenClawGatewayError as exc:
